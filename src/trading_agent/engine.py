@@ -283,6 +283,8 @@ class PortfolioBacktester:
                         reason = "stop_loss" if stop_hit else "take_profit"
                         realized += close(leg, fill_mid, t, reason)
                         leg.blocked = d
+                if leg.k == len(leg.times) and leg.pos is not None:
+                    realized += close(leg, leg.c[i], t, "end_of_data")
                 closed_bars.append((leg, leg.c[i]))
 
             for leg, price in closed_bars:

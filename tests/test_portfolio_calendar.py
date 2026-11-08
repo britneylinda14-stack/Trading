@@ -154,3 +154,14 @@ def test_research_sweep_splits_in_and_out_of_sample():
     assert {"is_sharpe", "oos_sharpe", "fast", "slow"} <= set(res.table.columns)
     assert res.table["is_sharpe"].is_monotonic_decreasing
     assert "out-of-sample" in res.summary()
+
+
+def test_leg_closes_when_its_data_ends():
+    short = make_bars([1.10, 1.10, 1.11, 1.12], freq="D")
+    long = make_bars([1.10] * 8, freq="D")
+    res = PortfolioBacktester(
+        [(EUR, FixedStrategy([0, 1, 1, 1], 0.05)), (GBP, FixedStrategy([0] * 8, 0.05))]
+    ).run({"EUR_USD": short, "GBP_USD": long})
+    t = res.trades[0]
+    assert t.exit_reason == "end_of_data" and t.exit_time == short.index[-1]
+    assert res.equity.iloc[-1] == pytest.approx(res.equity.loc[short.index[-1]])

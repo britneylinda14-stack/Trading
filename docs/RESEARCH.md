@@ -10,22 +10,23 @@
 Each parameter set was **tuned on 2010–2019 (in-sample) and then run untouched on
 2020-01 → 2026-10 (out-of-sample)**. The hourly session breakout only has about 2 years of Yahoo
 data, so its split is 2024-11 → 2025-10 / 2025-11 → 2026-11.
+Yahoo only serves the most recent ~730 days of hourly bars, so these numbers shift as that window moves forward.
 
 Reproduce: `trading-agent research -i all -s <strategy> --risk 0.005 --max-drawdown 0.5`
 
 | Strategy | Sets | Positive Sharpe in-sample | Positive Sharpe out-of-sample | Best in-sample set → out-of-sample Sharpe | Median out-of-sample Sharpe |
 |---|---|---|---|---|---|
-| `donchian` (daily) | 10 | 9 | **0** | 0.34 → -0.18 | -0.27 |
-| `ema_cross` (daily) | 24 | 1 | 18 | 0.00 → 0.24 | 0.11 |
-| `mean_reversion` (daily) | 27 | 3 | 3 | 0.15 → -0.25 | -0.43 |
-| `session_breakout` (1h) | 18 | 2 | **0** | 0.27 → -0.35 | -1.55 |
+| `donchian` (daily) | 10 | 9 | **0** | 0.34 → -0.20 | -0.31 |
+| `ema_cross` (daily) | 24 | 1 | 17 | 0.00 → 0.22 | 0.10 |
+| `mean_reversion` (daily) | 27 | 3 | 3 | 0.15 → -0.25 | -0.44 |
+| `session_breakout` (1h) | 18 | 2 | 3 | 0.37 → -0.01 | -1.03 |
 
 **News filter** (portfolio `ema_cross` 50/200, daily, 2010–2026):
 
 | Variant | Return | Max drawdown | Sharpe |
 |---|---|---|---|
-| No filter | -0.3% | -34.0% | 0.03 |
-| `--news-filter` (no entries on event days) | -0.1% | -33.9% | 0.03 |
+| No filter | -1.1% | -34.0% | 0.02 |
+| `--news-filter` (no entries on event days) | -0.9% | -33.9% | 0.02 |
 | `--news-filter --flatten-on-events` | -7.9% | -10.9% | -0.49 |
 
 ## Takeaways

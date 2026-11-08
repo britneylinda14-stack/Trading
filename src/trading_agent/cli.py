@@ -207,7 +207,17 @@ def cmd_research(args: argparse.Namespace):
     def progress(n, total, params):
         print(f"  [{n}/{total}] {params}", flush=True)
 
-    result = sweep(
+    try:
+        result = _run_sweep(args, instruments, data, grid, progress)
+    except ValueError as exc:
+        raise SystemExit(f"error: {exc}") from None
+    out = write_sweep(result, Path(args.out) / "research" / args.strategy)
+    _print_sweep(result, out)
+    return result
+
+
+def _run_sweep(args, instruments, data, grid, progress):
+    return sweep(
         instruments,
         args.strategy,
         data,
@@ -218,14 +228,15 @@ def cmd_research(args: argparse.Namespace):
         args.flatten_on_events,
         progress,
     )
-    out = write_sweep(result, Path(args.out) / "research" / args.strategy)
+
+
+def _print_sweep(result, out) -> None:
     with pd.option_context(*TABLE_FMT, "display.max_columns", None):
         print()
         print(result.table.head(10))
     print()
     print(result.summary())
     print(f"\nfull table: {out / 'sweep.csv'}")
-    return result
 
 
 def main(argv: list[str] | None = None) -> None:

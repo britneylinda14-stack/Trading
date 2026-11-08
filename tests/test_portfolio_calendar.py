@@ -166,3 +166,9 @@ def test_leg_closes_when_its_data_ends():
     t = res.trades[0]
     assert t.exit_reason == "end_of_data" and t.exit_time == short.index[-1]
     assert res.equity.iloc[-1] == pytest.approx(res.equity.loc[short.index[-1]])
+
+
+def test_research_rejects_split_outside_data():
+    bars = make_bars(np.linspace(1.0, 1.1, 50), start="2025-01-01")
+    with pytest.raises(ValueError, match="inside the data range"):
+        sweep([EUR], "ema_cross", {"EUR_USD": bars}, "2020-01-01", {"fast": [5], "slow": [10]})

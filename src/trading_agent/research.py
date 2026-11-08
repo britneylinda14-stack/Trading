@@ -113,6 +113,12 @@ def sweep(
 ) -> SweepResult:
     risk = risk or RiskConfig()
     split = pd.Timestamp(split)
+    first = min(df.index[0] for df in data.values())
+    last = max(df.index[-1] for df in data.values())
+    if not first < split < last:
+        raise ValueError(
+            f"split {split.date()} must fall inside the data range {first.date()} .. {last.date()}"
+        )
     combos = expand_grid(grid or DEFAULT_GRIDS[strategy])
     rows = []
     for n, params in enumerate(combos, 1):

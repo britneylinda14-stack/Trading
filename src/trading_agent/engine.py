@@ -1,4 +1,4 @@
-"""Bar-by-bar backtest engine for a single instrument.
+"""Bar-by-bar backtest engine, single instrument or portfolio with shared equity.
 
 Execution model:
 - A signal computed on bar i's close is executed at bar i+1's open (no lookahead).
@@ -7,13 +7,19 @@ Execution model:
   fills at the open. If both stop and target are touched in one bar, the stop wins.
 - One net position per instrument: no hedging, so US FIFO rules are satisfied.
 - Financing is charged per calendar day held on the USD notional.
+- Portfolio limits: margin used (notional / leverage cap) never exceeds equity, and the
+  sum of open trades' initial risk stays under `max_open_risk`.
+- Optional economic-calendar blackout: no new entries on bars overlapping an event
+  window, and optionally flatten at the open of such bars.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass, field
+from datetime import date
 
+import numpy as np
 import pandas as pd
 
 from .instruments import Instrument
@@ -49,13 +55,24 @@ class Trade:
 
 @dataclass
 class BacktestResult:
-    instrument: Instrument
+    instruments: list[Instrument]
     strategy: str
     risk: RiskConfig
     equity: pd.Series
     trades: list[Trade] = field(default_factory=list)
     events: list[str] = field(default_factory=list)
     skipped_signals: int = 0
+    blackout_skips: int = 0
+
+    @property
+    def instrument(self) -> Instrument:
+        return self.instruments[0]
+
+    @property
+    def label(self) -> str:
+        if len(self.instruments) == 1:
+            return self.instruments[0].name
+        return f"PORTFOLIO({len(self.instruments)})"
 
     def trades_frame(self) -> pd.DataFrame:
         rows = []
@@ -66,156 +83,270 @@ class BacktestResult:
         return pd.DataFrame(rows)
 
 
-class Backtester:
-    def __init__(self, instrument: Instrument, strategy: Strategy, risk: RiskConfig | None = None):
-        self.instrument = instrument
-        self.strategy = strategy
+@dataclass
+class _Leg:
+    inst: Instrument
+    times: pd.DatetimeIndex
+    o: np.ndarray
+    h: np.ndarray
+    lo: np.ndarray
+    c: np.ndarray
+    direction: np.ndarray
+    stop_dist: np.ndarray
+    blackout: np.ndarray
+    leverage: float
+    k: int = 0
+    pos: Trade | None = None
+    blocked: int = 0
+    last_skipped: int = 0
+    last_price: float = float("nan")
+    last_day: date | None = None
+
+
+class PortfolioBacktester:
+    def __init__(
+        self,
+        legs: list[tuple[Instrument, Strategy]],
+        risk: RiskConfig | None = None,
+        calendar=None,
+        flatten_on_events: bool = False,
+    ):
+        if not legs:
+            raise ValueError("need at least one (instrument, strategy) leg")
+        names = [inst.name for inst, _ in legs]
+        if len(set(names)) != len(names):
+            raise ValueError("duplicate instrument in portfolio")
+        self.legs = legs
         self.risk = risk or RiskConfig()
-        cap = instrument.max_leverage
-        if self.risk.max_leverage is not None:
-            cap = min(cap, self.risk.max_leverage)
-        self.max_leverage = cap
+        self.calendar = calendar
+        self.flatten_on_events = flatten_on_events
 
-    def _pnl_usd(self, trade: Trade, exit_price: float) -> float:
+    def _leverage(self, inst: Instrument) -> float:
+        cap = inst.max_leverage
+        return min(cap, self.risk.max_leverage) if self.risk.max_leverage else cap
+
+    def _prepare(self, inst: Instrument, strategy: Strategy, bars: pd.DataFrame) -> _Leg:
+        signals = strategy.generate(bars).reindex(bars.index)
+        blackout = (
+            self.calendar.blackout(bars.index, inst)
+            if self.calendar is not None
+            else np.zeros(len(bars), dtype=bool)
+        )
+        return _Leg(
+            inst,
+            bars.index,
+            *(bars[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close")),
+            signals["direction"].fillna(0).astype(int).to_numpy(),
+            signals["stop_distance"].to_numpy(dtype=float),
+            blackout,
+            self._leverage(inst),
+        )
+
+    @staticmethod
+    def _pnl_usd(inst: Instrument, trade: Trade, exit_price: float) -> float:
         quote_pnl = trade.direction * trade.units * (exit_price - trade.entry_price)
-        return self.instrument.to_usd(quote_pnl, exit_price)
+        return inst.to_usd(quote_pnl, exit_price)
 
-    def size_position(self, equity: float, price: float, stop_distance: float) -> int:
-        inst = self.instrument
-        loss_per_unit = inst.to_usd(stop_distance + inst.spread, price)
-        if loss_per_unit <= 0 or equity <= 0:
-            return 0
-        units = equity * self.risk.risk_per_trade / loss_per_unit
-        max_units = equity * self.max_leverage / inst.notional_usd(1, price)
-        return int(math.floor(min(units, max_units)))
-
-    def run(self, bars: pd.DataFrame) -> BacktestResult:
-        inst, risk = self.instrument, self.risk
-        signals = self.strategy.generate(bars).reindex(bars.index)
-        direction = signals["direction"].fillna(0).astype(int).to_numpy()
-        stop_dist = signals["stop_distance"].to_numpy(dtype=float)
-        times = bars.index
-        o, h, lo, c = (bars[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
-        half = inst.spread / 2
+    def run(
+        self, data: dict[str, pd.DataFrame], trade_from: pd.Timestamp | str | None = None
+    ) -> BacktestResult:
+        """Run the backtest. Bars before `trade_from` only warm up indicators."""
+        risk = self.risk
+        trade_from = pd.Timestamp(trade_from) if trade_from is not None else None
+        legs = [self._prepare(inst, strat, data[inst.name]) for inst, strat in self.legs]
+        timeline = legs[0].times
+        for leg in legs[1:]:
+            timeline = timeline.union(leg.times)
 
         realized = risk.initial_equity
-        pos: Trade | None = None
         trades: list[Trade] = []
         events: list[str] = []
-        equity_curve = [realized]
-        peak = realized
-        day_start_equity = realized
-        current_day = times[0].date()
-        halted_today = False
-        killed = False
-        blocked_direction = 0
-        skipped_signals = 0
-        last_skipped = 0
+        equity_curve: list[float] = []
+        peak = day_start_equity = realized
+        current_day = None
+        halted_today = killed = False
+        skipped_signals = blackout_skips = 0
 
-        def close(trade: Trade, mid_price: float, when: pd.Timestamp, reason: str) -> float:
-            fill = mid_price - trade.direction * half
+        def unrealized() -> float:
+            return sum(self._pnl_usd(leg.inst, leg.pos, leg.last_price) for leg in legs if leg.pos)
+
+        def close(leg: _Leg, mid_price: float, when: pd.Timestamp, reason: str) -> float:
+            trade, inst = leg.pos, leg.inst
+            fill = mid_price - trade.direction * inst.spread / 2
             trade.exit_price, trade.exit_time, trade.exit_reason = fill, when, reason
-            trade.gross_pnl = self._pnl_usd(trade, fill)
+            trade.gross_pnl = self._pnl_usd(inst, trade, fill)
             trade.spread_cost = inst.to_usd(trade.units * inst.spread, fill)
             trades.append(trade)
+            leg.pos = None
             return trade.gross_pnl
 
-        def mark(price: float) -> float:
-            return realized + (self._pnl_usd(pos, price) if pos else 0.0)
+        def size(leg: _Leg, equity: float, price: float, dist: float) -> int:
+            inst = leg.inst
+            loss_per_unit = inst.to_usd(dist + inst.spread, price)
+            if loss_per_unit <= 0 or equity <= 0:
+                return 0
+            open_risk = sum(lg.pos.risk_usd for lg in legs if lg.pos)
+            margin_used = sum(
+                lg.inst.notional_usd(lg.pos.units, lg.last_price) / lg.leverage
+                for lg in legs
+                if lg.pos
+            )
+            by_risk = equity * risk.risk_per_trade / loss_per_unit
+            by_budget = max(equity * risk.max_open_risk - open_risk, 0) / loss_per_unit
+            by_margin = max(equity - margin_used, 0) * leg.leverage / inst.notional_usd(1, price)
+            return int(math.floor(min(by_risk, by_budget, by_margin)))
 
-        for i in range(1, len(bars)):
-            t = times[i]
+        for t in timeline:
+            warming_up = trade_from is not None and t < trade_from
             day = t.date()
             if day != current_day:
-                if pos is not None:
-                    days = (day - current_day).days
-                    cost = inst.notional_usd(pos.units, c[i - 1]) * inst.financing_rate * days / 365
-                    pos.financing += cost
-                    realized -= cost
                 current_day = day
-                day_start_equity = equity_curve[-1]
+                if equity_curve:
+                    day_start_equity = equity_curve[-1]
                 halted_today = False
 
-            sig, dist = direction[i - 1], stop_dist[i - 1]
-            if sig != blocked_direction:
-                blocked_direction = 0
+            closed_bars: list[tuple[_Leg, float]] = []
+            for leg in legs:
+                if leg.k >= len(leg.times) or leg.times[leg.k] != t:
+                    continue
+                i, inst = leg.k, leg.inst
+                leg.k += 1
+                if i == 0:
+                    leg.last_price, leg.last_day = leg.c[0], day
+                    continue
+                half = inst.spread / 2
 
-            if pos is not None and sig != pos.direction:
-                realized += close(pos, o[i], t, "signal")
-                pos = None
+                if day != leg.last_day:
+                    if leg.pos is not None:
+                        days = (day - leg.last_day).days
+                        notional = inst.notional_usd(leg.pos.units, leg.c[i - 1])
+                        cost = notional * inst.financing_rate * days / 365
+                        leg.pos.financing += cost
+                        realized -= cost
+                    leg.last_day = day
+                leg.last_price = leg.o[i]
 
-            can_trade = not (halted_today or killed)
-            if pos is None and sig != 0 and sig != blocked_direction and can_trade:
-                if math.isfinite(dist) and dist > 0:
-                    entry = o[i] + sig * half
-                    units = self.size_position(mark(o[i]), o[i], dist)
-                    if units < 1 and sig != last_skipped:
-                        skipped_signals += 1
-                        last_skipped = sig
-                    if units >= 1:
-                        last_skipped = 0
-                        stop = entry - sig * dist
-                        tp = entry + sig * dist * risk.take_profit_r if risk.take_profit_r else None
-                        pos = Trade(
-                            inst.name,
-                            int(sig),
-                            units,
-                            t,
-                            entry,
-                            stop,
-                            risk_usd=inst.to_usd(units * (dist + inst.spread), o[i]),
-                            take_profit=tp,
-                        )
+                sig, dist, blackout = leg.direction[i - 1], leg.stop_dist[i - 1], leg.blackout[i]
+                if sig != leg.blocked:
+                    leg.blocked = 0
 
-            if pos is not None:
-                d = pos.direction
-                stop_hit = lo[i] <= pos.stop_price if d > 0 else h[i] >= pos.stop_price
-                tp_hit = pos.take_profit is not None and (
-                    h[i] >= pos.take_profit if d > 0 else lo[i] <= pos.take_profit
-                )
-                if stop_hit:
-                    level = pos.stop_price + d * half
-                    gapped = (o[i] < level) if d > 0 else (o[i] > level)
-                    fill_mid = o[i] if gapped and t != pos.entry_time else level
-                    realized += close(pos, fill_mid, t, "stop_loss")
-                    blocked_direction = d
-                    pos = None
-                elif tp_hit:
-                    level = pos.take_profit + d * half
-                    gapped = (o[i] > level) if d > 0 else (o[i] < level)
-                    fill_mid = o[i] if gapped and t != pos.entry_time else level
-                    realized += close(pos, fill_mid, t, "take_profit")
-                    blocked_direction = d
-                    pos = None
+                if leg.pos is not None:
+                    if sig != leg.pos.direction:
+                        realized += close(leg, leg.o[i], t, "signal")
+                    elif blackout and self.flatten_on_events:
+                        realized += close(leg, leg.o[i], t, "news_blackout")
+                        leg.blocked = sig
 
-            eq = mark(c[i])
-            if pos is not None and eq <= day_start_equity * (1 - risk.max_daily_loss):
-                realized += close(pos, c[i], t, "daily_loss_limit")
-                blocked_direction = pos.direction
-                pos = None
+                last_bar = leg.k == len(leg.times)
+                wants_entry = leg.pos is None and sig != 0 and sig != leg.blocked and not last_bar
+                if wants_entry and blackout:
+                    blackout_skips += 1
+                elif wants_entry and not (halted_today or killed or warming_up):
+                    if math.isfinite(dist) and dist > 0:
+                        units = size(leg, realized + unrealized(), leg.o[i], dist)
+                        if units < 1 and sig != leg.last_skipped:
+                            skipped_signals += 1
+                            leg.last_skipped = sig
+                        if units >= 1:
+                            leg.last_skipped = 0
+                            entry = leg.o[i] + sig * half
+                            tp = (
+                                entry + sig * dist * risk.take_profit_r
+                                if risk.take_profit_r
+                                else None
+                            )
+                            leg.pos = Trade(
+                                inst.name,
+                                int(sig),
+                                units,
+                                t,
+                                entry,
+                                entry - sig * dist,
+                                risk_usd=inst.to_usd(units * (dist + inst.spread), leg.o[i]),
+                                take_profit=tp,
+                            )
+
+                pos = leg.pos
+                if pos is not None:
+                    d = pos.direction
+                    stop_hit = leg.lo[i] <= pos.stop_price if d > 0 else leg.h[i] >= pos.stop_price
+                    tp_hit = pos.take_profit is not None and (
+                        leg.h[i] >= pos.take_profit if d > 0 else leg.lo[i] <= pos.take_profit
+                    )
+                    if stop_hit or tp_hit:
+                        target = pos.stop_price if stop_hit else pos.take_profit
+                        level = target + d * half
+                        if stop_hit:
+                            gapped = leg.o[i] < level if d > 0 else leg.o[i] > level
+                        else:
+                            gapped = leg.o[i] > level if d > 0 else leg.o[i] < level
+                        fill_mid = leg.o[i] if gapped and t != pos.entry_time else level
+                        reason = "stop_loss" if stop_hit else "take_profit"
+                        realized += close(leg, fill_mid, t, reason)
+                        leg.blocked = d
+                if leg.k == len(leg.times) and leg.pos is not None:
+                    realized += close(leg, leg.c[i], t, "end_of_data")
+                closed_bars.append((leg, leg.c[i]))
+
+            for leg, price in closed_bars:
+                leg.last_price = price
+
+            eq = realized + unrealized()
+            if not halted_today and eq <= day_start_equity * (1 - risk.max_daily_loss):
+                for leg in [leg for leg in legs if leg.pos]:
+                    leg.blocked = leg.pos.direction
+                    realized += close(leg, leg.last_price, t, "daily_loss_limit")
                 halted_today = True
                 events.append(f"{t}: daily loss limit hit, trading halted for the day")
                 eq = realized
             if not killed and eq <= peak * (1 - risk.max_drawdown):
-                if pos is not None:
-                    realized += close(pos, c[i], t, "max_drawdown_kill")
-                    pos = None
-                    eq = realized
+                for leg in legs:
+                    if leg.pos:
+                        realized += close(leg, leg.last_price, t, "max_drawdown_kill")
+                eq = realized
                 killed = True
                 events.append(f"{t}: max drawdown kill switch triggered, trading stopped")
             peak = max(peak, eq)
             equity_curve.append(eq)
 
-        if pos is not None:
-            realized += close(pos, c[-1], times[-1], "end_of_data")
-            equity_curve[-1] = realized
+        for leg in legs:
+            if leg.pos is not None:
+                realized += close(leg, leg.last_price, leg.times[-1], "end_of_data")
+        equity_curve[-1] = realized
+        trades.sort(key=lambda tr: tr.entry_time)
+        equity = pd.Series(equity_curve, index=timeline, name="equity")
+        if trade_from is not None:
+            start = max(int(equity.index.searchsorted(trade_from)) - 1, 0)
+            equity = equity.iloc[start:]
 
         return BacktestResult(
-            inst,
-            self.strategy.name,
+            [inst for inst, _ in self.legs],
+            self.legs[0][1].name,
             risk,
-            pd.Series(equity_curve, index=times, name="equity"),
+            equity,
             trades,
             events,
             skipped_signals,
+            blackout_skips,
         )
+
+
+class Backtester:
+    """Single-instrument convenience wrapper around PortfolioBacktester."""
+
+    def __init__(
+        self,
+        instrument: Instrument,
+        strategy: Strategy,
+        risk: RiskConfig | None = None,
+        calendar=None,
+        flatten_on_events: bool = False,
+    ):
+        self.instrument = instrument
+        self._engine = PortfolioBacktester(
+            [(instrument, strategy)], risk, calendar, flatten_on_events
+        )
+        self.risk = self._engine.risk
+
+    def run(self, bars: pd.DataFrame, trade_from=None) -> BacktestResult:
+        return self._engine.run({self.instrument.name: bars}, trade_from)

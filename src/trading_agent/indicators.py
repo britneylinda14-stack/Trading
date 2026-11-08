@@ -23,3 +23,10 @@ def true_range(bars: pd.DataFrame) -> pd.Series:
 def atr(bars: pd.DataFrame, period: int = 14) -> pd.Series:
     """Wilder's Average True Range."""
     return true_range(bars).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+
+def efficiency_ratio(series: pd.Series, period: int) -> pd.Series:
+    """Kaufman efficiency ratio: |net change| / sum of |bar changes|. 1 = pure trend, 0 = noise."""
+    net = (series - series.shift(period)).abs()
+    path = series.diff().abs().rolling(period).sum()
+    return net / path

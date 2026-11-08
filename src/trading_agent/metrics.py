@@ -47,4 +47,21 @@ def compute_metrics(result: BacktestResult) -> dict[str, float]:
         "financing_costs": float(sum(t.financing for t in trades)),
         "years": float(years),
         "skipped_signals": result.skipped_signals,
+        "blackout_skips": result.blackout_skips,
     }
+
+
+def per_instrument(result: BacktestResult) -> pd.DataFrame:
+    """Trade count, P&L and win rate per instrument."""
+    df = result.trades_frame()
+    if df.empty:
+        return pd.DataFrame(columns=["trades", "pnl", "win_rate_pct", "avg_r"])
+    g = df.groupby("instrument")
+    return pd.DataFrame(
+        {
+            "trades": g.size(),
+            "pnl": g["pnl"].sum(),
+            "win_rate_pct": g["pnl"].apply(lambda x: (x > 0).mean() * 100),
+            "avg_r": g["r_multiple"].mean(),
+        }
+    ).sort_values("pnl", ascending=False)

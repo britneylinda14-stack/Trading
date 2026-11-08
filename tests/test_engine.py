@@ -73,7 +73,9 @@ def test_reversal_closes_before_opening_no_hedging():
 def test_daily_loss_limit_flattens_and_halts():
     closes = [1.10, 1.10] + [1.10 - 0.001 * k for k in range(1, 15)]
     bars = make_bars(closes, freq="h", start="2024-01-02")
-    res = run(bars, [1] * len(closes), 0.05, risk_per_trade=0.2, max_daily_loss=0.03)
+    res = run(
+        bars, [1] * len(closes), 0.05, risk_per_trade=0.2, max_open_risk=0.5, max_daily_loss=0.03
+    )
     assert len(res.trades) == 1
     assert res.trades[0].exit_reason == "daily_loss_limit"
     assert res.equity.iloc[-1] > 10_000 * (1 - 0.04)
@@ -84,7 +86,13 @@ def test_max_drawdown_kill_switch():
     closes = [1.10, 1.10] + [1.10 - 0.002 * k for k in range(1, 30)]
     bars = make_bars(closes, freq="D")
     res = run(
-        bars, [1] * len(closes), 0.2, risk_per_trade=0.5, max_daily_loss=0.5, max_drawdown=0.1
+        bars,
+        [1] * len(closes),
+        0.2,
+        risk_per_trade=0.5,
+        max_open_risk=0.9,
+        max_daily_loss=0.5,
+        max_drawdown=0.1,
     )
     assert res.trades[-1].exit_reason == "max_drawdown_kill"
     assert len(res.trades) == 1
@@ -121,3 +129,12 @@ def test_signal_skipped_when_position_below_one_unit():
     res = run(bars, [0, 1, 1, 1, 1], 500.0, inst=gold, initial_equity=1_000)
     assert res.trades == []
     assert res.skipped_signals == 1
+
+
+def test_daily_halt_applies_after_stop_loss():
+    closes = [1.10, 1.10, 1.10, 1.10]
+    bars = make_bars(closes, freq="h", start="2024-01-02", wick=0.0001)
+    bars.loc[bars.index[2], "low"] = 1.09
+    res = run(bars, [0, 1, 1, -1], 0.005, risk_per_trade=0.05, max_open_risk=0.5)
+    assert [t.exit_reason for t in res.trades] == ["stop_loss"]
+    assert any("daily loss" in e for e in res.events)

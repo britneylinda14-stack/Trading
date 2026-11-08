@@ -23,7 +23,7 @@ discretionary "is this a clean setup" judgment.
 Engine support: a strategy can now return per-signal `take_profit_r`, `breakeven_r` and `partial`
 columns. When price reaches `breakeven_r` the engine closes `partial` of the units there and moves
 the stop to entry. If the same bar also trades back through entry, it is scored as a breakeven exit
-(the conservative order).
+(the conservative order), unless the bar opened beyond the target.
 
 ## Data and costs
 
@@ -38,14 +38,14 @@ Default settings, each market traded alone, 2012–2026:
 
 | | Trades | TP | BE | SL | Avg R | Return | Max DD |
 |---|---|---|---|---|---|---|---|
-| EUR/USD 1h | 160 | 22 | 52 | 84 | -0.12 | -18% | -20% |
-| Gold 1h | 144 | 22 | 41 | 78 | -0.13 | -17% | -21% |
-| Silver 1h | 144 | 20 | 48 | 72 | -0.04 | -7% | -12% |
+| EUR/USD 1h | 160 | 18 | 56 | 84 | -0.15 | -22% | -23% |
+| Gold 1h | 144 | 21 | 42 | 78 | -0.14 | -18% | -22% |
+| Silver 1h | 144 | 19 | 49 | 72 | -0.05 | -7% | -13% |
 | EUR/USD 30m | 238 | 27 | 57 | 145 | -0.25 | -45% | -46% |
 | Gold 30m | 243 | 44 | 68 | 126 | -0.04 | -10% | -14% |
-| Silver 30m | 252 | 31 | 62 | 149 | -0.15 | -32% | -37% |
+| Silver 30m | 252 | 30 | 63 | 149 | -0.16 | -33% | -37% |
 
-Without any spread, 1h average R improves to EUR/USD -0.09, gold -0.08, silver +0.10, so costs are
+Without any spread, 1h average R is EUR/USD -0.12, gold -0.09, silver +0.10, so costs are
 not the main problem.
 
 Parameter sweep on the 3-market portfolio (`swing`, `fib_max`, `divergence`, `tp_r`; 16 sets),
@@ -53,16 +53,16 @@ tuned on 2012–2019 and tested on 2020–2026:
 
 | | Positive Sharpe in-sample | Positive Sharpe out-of-sample | Median out-of-sample Sharpe |
 |---|---|---|---|
-| 1h | 0/16 | 0/16 | -0.40 |
-| 30m | 0/16 | 0/16 | -0.90 |
+| 1h | 0/16 | 0/16 | -0.48 |
+| 30m | 0/16 | 0/16 | -0.93 |
 
 ## Journal vs automated
 
 | | Journal (manual, 2023) | Automated (1h, 2012–2026) |
 |---|---|---|
 | Trades | 108 in ~3 weeks of logging | 448 over 15 years |
-| TP / BE / SL | 48% / 28% / 24% | 14% / 31% / 52% |
-| Avg R per trade | about +1.0 | -0.10 |
+| TP / BE / SL | 48% / 28% / 24% | 13% / 33% / 52% |
+| Avg R per trade | about +1.0 | -0.11 |
 
 The breakeven share matches; the big gap is that the mechanical version gets stopped out about
 twice as often and reaches the target about a third as often. Two explanations, not separable with
@@ -72,7 +72,7 @@ this data:
    carry the edge.
 2. Manual backtests on past charts select setups with hindsight, which inflates TP rates.
 
-Like the journal, the Tokyo session is the weakest (avg R -0.16 vs London -0.09, New York -0.03 on 1h).
+Like the journal, the Tokyo session is the weakest (avg R -0.17 vs London -0.12, New York -0.03 on 1h).
 
 ## Conclusion
 

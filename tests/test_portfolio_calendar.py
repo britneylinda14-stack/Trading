@@ -228,3 +228,18 @@ def test_histdata_parses_est_minutes_into_utc_bars():
     df = parse_m1(buf.getvalue())
     assert list(df.index) == [pd.Timestamp("2018-01-01 22:00"), pd.Timestamp("2018-01-01 22:01")]
     assert df.iloc[1]["high"] == 1.4 and df.iloc[0]["close"] == 1.25
+
+
+def test_histdata_fetches_previous_file_for_utc_boundary(monkeypatch):
+    from datetime import datetime
+
+    from trading_agent.data import histdata
+
+    periods = []
+    monkeypatch.setattr(histdata, "_fetch", lambda pair, period, *a: periods.append(period) or b"")
+    now = datetime.utcnow()
+    start = f"{now.year}-{now.month:02d}-01"
+    with pytest.raises(RuntimeError):
+        histdata.load_histdata(get_instrument("EUR_USD"), start, cache_dir=None)
+    previous = str(now.year - 1) if now.month == 1 else f"{now.year}/{now.month - 1}"
+    assert previous in periods

@@ -95,8 +95,10 @@ def load_histdata(
     first = pd.Timestamp(start).to_pydatetime()
     last = min(pd.Timestamp(end).to_pydatetime(), now) if end else now
 
+    # Files are in fixed EST, so the first UTC hours of a period live in the previous file.
+    fetch_from = first - pd.Timedelta(hours=5)
     frames = []
-    for year in range(first.year, last.year + 1):
+    for year in range(fetch_from.year, last.year + 1):
         if year < now.year:
             periods = [(str(year), True)]
         else:

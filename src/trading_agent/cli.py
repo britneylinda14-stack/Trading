@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from .calendar import EventCalendar
-from .data import load_csv, load_mt5_csv, load_yahoo
+from .data import load_csv, load_dukascopy, load_histdata, load_mt5_csv, load_yahoo
 from .engine import PortfolioBacktester
 from .instruments import INSTRUMENTS, get_instrument
 from .metrics import compute_metrics, per_instrument
@@ -58,7 +58,13 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("-s", "--strategy", default="ema_cross", choices=list(STRATEGIES))
     p.add_argument("--start", default="2010-01-01")
     p.add_argument("--end", default=None)
-    p.add_argument("--interval", default="1d", help="Yahoo interval: 1d, 1h, ...")
+    p.add_argument("--interval", default="1d", help="Bar interval: 1d, 1h, 30m, ...")
+    p.add_argument(
+        "--source",
+        choices=["yahoo", "histdata", "dukascopy"],
+        default="yahoo",
+        help="Historical data source (histdata/dukascopy: free multi-year intraday FX and metals)",
+    )
     p.add_argument("--csv", help="Use a local CSV (time,open,high,low,close) instead of Yahoo")
     p.add_argument("--mt5-csv", help="Use a MetaTrader 5 bars export instead of Yahoo")
     p.add_argument("--equity", type=float, default=10_000)
@@ -127,6 +133,10 @@ def _load(inst, args) -> pd.DataFrame:
         return load_mt5_csv(args.mt5_csv)
     if args.csv:
         return load_csv(args.csv)
+    if args.source == "histdata":
+        return load_histdata(inst, args.start, args.end, args.interval)
+    if args.source == "dukascopy":
+        return load_dukascopy(inst, args.start, args.end, args.interval)
     return load_yahoo(inst, args.start, args.end, args.interval)
 
 

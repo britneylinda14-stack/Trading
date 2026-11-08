@@ -1,4 +1,5 @@
 from .base import Strategy
+from .pullback import AtmPullback
 from .reversion import MeanReversion, SessionBreakout
 from .trend import DonchianBreakout, EmaCross
 
@@ -7,6 +8,7 @@ STRATEGIES: dict[str, type[Strategy]] = {
     DonchianBreakout.name: DonchianBreakout,
     MeanReversion.name: MeanReversion,
     SessionBreakout.name: SessionBreakout,
+    AtmPullback.name: AtmPullback,
 }
 
 
@@ -19,6 +21,7 @@ def get_strategy(name: str, **params) -> Strategy:
 
 __all__ = [
     "STRATEGIES",
+    "AtmPullback",
     "DonchianBreakout",
     "EmaCross",
     "MeanReversion",

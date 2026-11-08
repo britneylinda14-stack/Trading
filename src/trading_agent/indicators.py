@@ -30,3 +30,11 @@ def efficiency_ratio(series: pd.Series, period: int) -> pd.Series:
     net = (series - series.shift(period)).abs()
     path = series.diff().abs().rolling(period).sum()
     return net / path
+
+
+def rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    """Wilder's Relative Strength Index."""
+    delta = series.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    return 100 - 100 / (1 + gain / loss)

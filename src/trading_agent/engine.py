@@ -5,6 +5,9 @@ Execution model:
 - Fills pay half the spread on entry and half on exit.
 - Stops (and optional take-profits) are checked intrabar; a gap through the stop
   fills at the open. If both stop and target are touched in one bar, the stop wins.
+- Strategies may also return per-bar `take_profit_r`, `breakeven_r` and `partial` columns:
+  at `breakeven_r` x stop distance the `partial` fraction is closed and the stop moves to
+  entry; `take_profit_r` overrides the risk config's target for that entry.
 - One net position per instrument: no hedging, so US FIFO rules are satisfied.
 - Financing is charged per calendar day held on the USD notional.
 - Portfolio limits: margin used (notional / leverage cap) never exceeds equity, and the
@@ -43,6 +46,10 @@ class Trade:
     gross_pnl: float = 0.0
     spread_cost: float = 0.0
     financing: float = 0.0
+    breakeven_price: float | None = None
+    partial_fraction: float = 0.0
+    partial_units: int = 0
+    partial_pnl: float = 0.0
 
     @property
     def pnl(self) -> float:
@@ -101,6 +108,19 @@ class _Leg:
     last_skipped: int = 0
     last_price: float = float("nan")
     last_day: date | None = None
+    tp_r: np.ndarray | None = None
+    be_r: np.ndarray | None = None
+    partial: np.ndarray | None = None
+
+
+def _optional(signals: pd.DataFrame, col: str) -> np.ndarray | None:
+    return signals[col].to_numpy(dtype=float) if col in signals else None
+
+
+def _at(values: np.ndarray | None, i: int) -> float | None:
+    if values is None or not math.isfinite(values[i]) or values[i] <= 0:
+        return None
+    return float(values[i])
 
 
 class PortfolioBacktester:
@@ -140,6 +160,9 @@ class PortfolioBacktester:
             signals["stop_distance"].to_numpy(dtype=float),
             blackout,
             self._leverage(inst),
+            tp_r=_optional(signals, "take_profit_r"),
+            be_r=_optional(signals, "breakeven_r"),
+            partial=_optional(signals, "partial"),
         )
 
     @staticmethod
@@ -174,11 +197,25 @@ class PortfolioBacktester:
             trade, inst = leg.pos, leg.inst
             fill = mid_price - trade.direction * inst.spread / 2
             trade.exit_price, trade.exit_time, trade.exit_reason = fill, when, reason
-            trade.gross_pnl = self._pnl_usd(inst, trade, fill)
-            trade.spread_cost = inst.to_usd(trade.units * inst.spread, fill)
+            remaining = self._pnl_usd(inst, trade, fill)
+            trade.gross_pnl = remaining + trade.partial_pnl
+            trade.spread_cost = inst.to_usd((trade.units + trade.partial_units) * inst.spread, fill)
             trades.append(trade)
             leg.pos = None
-            return trade.gross_pnl
+            return remaining
+
+        def take_partial(leg: _Leg, price: float) -> float:
+            trade, inst = leg.pos, leg.inst
+            trade.breakeven_price = None
+            trade.stop_price = trade.entry_price
+            part = min(int(trade.units * trade.partial_fraction), trade.units - 1)
+            if part < 1:
+                return 0.0
+            pnl = inst.to_usd(trade.direction * part * (price - trade.entry_price), price)
+            trade.units -= part
+            trade.partial_units += part
+            trade.partial_pnl += pnl
+            return pnl
 
         def size(leg: _Leg, equity: float, price: float, dist: float) -> int:
             inst = leg.inst
@@ -250,11 +287,9 @@ class PortfolioBacktester:
                         if units >= 1:
                             leg.last_skipped = 0
                             entry = leg.o[i] + sig * half
-                            tp = (
-                                entry + sig * dist * risk.take_profit_r
-                                if risk.take_profit_r
-                                else None
-                            )
+                            tp_r = _at(leg.tp_r, i - 1) or risk.take_profit_r
+                            tp = entry + sig * dist * tp_r if tp_r else None
+                            be_r = _at(leg.be_r, i - 1)
                             leg.pos = Trade(
                                 inst.name,
                                 int(sig),
@@ -265,6 +300,9 @@ class PortfolioBacktester:
                                 risk_usd=inst.to_usd(units * (dist + inst.spread), leg.o[i]),
                                 take_profit=tp,
                             )
+                            if be_r:
+                                leg.pos.breakeven_price = entry + sig * dist * be_r
+                                leg.pos.partial_fraction = _at(leg.partial, i - 1) or 0.0
 
                 pos = leg.pos
                 if pos is not None:
@@ -273,6 +311,27 @@ class PortfolioBacktester:
                     tp_hit = pos.take_profit is not None and (
                         leg.h[i] >= pos.take_profit if d > 0 else leg.lo[i] <= pos.take_profit
                     )
+                    be, back_to_entry = pos.breakeven_price, False
+                    if (
+                        be is not None
+                        and not stop_hit
+                        and (leg.h[i] >= be if d > 0 else leg.lo[i] <= be)
+                    ):
+                        realized += take_partial(leg, be)
+                        back = leg.c[i] if t == pos.entry_time else leg.lo[i] if d > 0 else leg.h[i]
+                        opened_at_target = (
+                            tp_hit
+                            and t != pos.entry_time
+                            and (
+                                leg.o[i] >= pos.take_profit + half
+                                if d > 0
+                                else leg.o[i] <= pos.take_profit - half
+                            )
+                        )
+                        if not opened_at_target and (
+                            back <= pos.entry_price if d > 0 else back >= pos.entry_price
+                        ):
+                            stop_hit = back_to_entry = True
                     if stop_hit or tp_hit:
                         target = pos.stop_price if stop_hit else pos.take_profit
                         level = target + d * half
@@ -280,8 +339,12 @@ class PortfolioBacktester:
                             gapped = leg.o[i] < level if d > 0 else leg.o[i] > level
                         else:
                             gapped = leg.o[i] > level if d > 0 else leg.o[i] < level
-                        fill_mid = leg.o[i] if gapped and t != pos.entry_time else level
-                        reason = "stop_loss" if stop_hit else "take_profit"
+                        early = gapped and t != pos.entry_time and not back_to_entry
+                        fill_mid = leg.o[i] if early else level
+                        reason = "take_profit"
+                        if stop_hit:
+                            at_entry = pos.stop_price == pos.entry_price
+                            reason = "breakeven" if at_entry else "stop_loss"
                         realized += close(leg, fill_mid, t, reason)
                         leg.blocked = d
                 if leg.k == len(leg.times) and leg.pos is not None:

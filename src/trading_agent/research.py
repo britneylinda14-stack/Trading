@@ -33,6 +33,12 @@ DEFAULT_GRIDS: dict[str, dict[str, list]] = {
         "session_end": [12, 16, 20],
         "stop_mult": [0.5, 1.0],
     },
+    "atm_pullback": {
+        "swing": [3, 5],
+        "fib_max": [0.618, 0.786],
+        "divergence": [True, False],
+        "tp_r": [2.0, 3.0],
+    },
 }
 
 KEY_METRICS = ["sharpe", "cagr_pct", "max_drawdown_pct", "total_return_pct", "trades", "avg_r"]

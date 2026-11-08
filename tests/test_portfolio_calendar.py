@@ -177,3 +177,69 @@ def test_research_rejects_split_outside_data():
 def test_default_calendar_covers_scheduled_cpi():
     cal = EventCalendar.default(include=("CPI",))
     assert pd.Timestamp("2027-01-13 13:30") in {e.time for e in cal.events}
+
+
+def _pullback_bars():
+    up = np.linspace(1.00, 1.10, 300)
+    swings = []
+    level = 1.10
+    for _ in range(4):
+        swings += list(np.linspace(level, level + 0.02, 15)) + list(
+            np.linspace(level + 0.02, level + 0.01, 8)
+        )
+        level += 0.01
+    closes = np.r_[up, swings, np.linspace(level, level + 0.03, 20)]
+    return make_bars(closes, freq="h", wick=0.0003)
+
+
+def test_atm_pullback_buys_trend_pullbacks_with_exit_plan():
+    from trading_agent.strategies import AtmPullback
+
+    bars = _pullback_bars()
+    sig = AtmPullback(swing=3, min_impulse_atr=1.0, divergence=False).generate(bars)
+    entries = sig.index[(sig["direction"] == 1) & (sig["direction"].shift(fill_value=0) != 1)]
+    assert len(entries) >= 1
+    assert (sig["direction"] >= 0).all()
+    assert (sig.loc[entries, "stop_distance"] > 0).all()
+    assert {"take_profit_r", "breakeven_r", "partial"} <= set(sig.columns)
+
+
+def test_atm_pullback_has_no_lookahead():
+    from trading_agent.strategies import AtmPullback
+
+    bars = _pullback_bars()
+    strat = AtmPullback(swing=3, min_impulse_atr=1.0, divergence=False)
+    full = strat.generate(bars)
+    cut = len(bars) - 25
+    partial = strat.generate(bars.iloc[:cut])
+    pd.testing.assert_series_equal(full["direction"].iloc[:cut], partial["direction"])
+
+
+def test_histdata_parses_est_minutes_into_utc_bars():
+    import io
+    import zipfile
+
+    from trading_agent.data.histdata import parse_m1
+
+    rows = "20180101 170000;1.2;1.3;1.1;1.25;0\n20180101 170100;1.25;1.4;1.2;1.3;0\n"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("DAT_ASCII_EURUSD_M1_2018.csv", rows)
+    df = parse_m1(buf.getvalue())
+    assert list(df.index) == [pd.Timestamp("2018-01-01 22:00"), pd.Timestamp("2018-01-01 22:01")]
+    assert df.iloc[1]["high"] == 1.4 and df.iloc[0]["close"] == 1.25
+
+
+def test_histdata_fetches_previous_file_for_utc_boundary(monkeypatch):
+    from datetime import datetime
+
+    from trading_agent.data import histdata
+
+    periods = []
+    monkeypatch.setattr(histdata, "_fetch", lambda pair, period, *a: periods.append(period) or b"")
+    now = datetime.utcnow()
+    start = f"{now.year}-{now.month:02d}-01"
+    with pytest.raises(RuntimeError):
+        histdata.load_histdata(get_instrument("EUR_USD"), start, cache_dir=None)
+    previous = str(now.year - 1) if now.month == 1 else f"{now.year}/{now.month - 1}"
+    assert previous in periods

@@ -10,30 +10,53 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from .engine import BacktestResult  # noqa: E402
-from .metrics import drawdown  # noqa: E402
+from .metrics import drawdown, per_instrument  # noqa: E402
 
 
 def write_report(
-    result: BacktestResult, metrics: dict, bars: pd.DataFrame, out_dir: str | Path
+    result: BacktestResult, metrics: dict, bars: pd.DataFrame | None, out_dir: str | Path
 ) -> Path:
+    """Write trades/equity/summary files and a chart. Pass `bars` to plot price (single leg)."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     result.trades_frame().to_csv(out / "trades.csv", index=False)
     result.equity.to_csv(out / "equity.csv")
+    breakdown = per_instrument(result)
+    breakdown.to_csv(out / "per_instrument.csv")
     (out / "summary.json").write_text(
-        json.dumps({"metrics": metrics, "events": result.events}, indent=2, default=str)
+        json.dumps(
+            {
+                "metrics": metrics,
+                "per_instrument": breakdown.to_dict(orient="index"),
+                "events": result.events,
+            },
+            indent=2,
+            default=str,
+        )
     )
 
     fig, axes = plt.subplots(
         3, 1, figsize=(12, 9), sharex=True, gridspec_kw={"height_ratios": [2, 2, 1]}
     )
-    title = f"{result.instrument.name} | {result.strategy}"
-    axes[0].plot(bars.index, bars["close"], color="#555", lw=0.8)
-    for t in result.trades:
-        color = "#1a9850" if t.direction > 0 else "#d73027"
-        axes[0].axvspan(t.entry_time, t.exit_time, color=color, alpha=0.12, lw=0)
-    axes[0].set_title(f"{title} - price (green=long, red=short)")
+    title = f"{result.label} | {result.strategy}"
+    if bars is not None and len(result.instruments) == 1:
+        axes[0].plot(bars.index, bars["close"], color="#555", lw=0.8)
+        for t in result.trades:
+            color = "#1a9850" if t.direction > 0 else "#d73027"
+            axes[0].axvspan(t.entry_time, t.exit_time, color=color, alpha=0.12, lw=0)
+        axes[0].set_title(f"{title} - price (green=long, red=short)")
+    else:
+        trades = result.trades_frame()
+        if not trades.empty:
+            pnl = trades.pivot_table(
+                index="exit_time", columns="instrument", values="pnl", aggfunc="sum"
+            )
+            pnl = pnl.fillna(0).cumsum()
+            for col in pnl.columns:
+                axes[0].step(pnl.index, pnl[col], where="post", lw=1, label=col)
+            axes[0].legend(fontsize=8, ncol=5, loc="upper left")
+        axes[0].set_title(f"{title} - cumulative P&L by instrument (USD)")
     axes[1].plot(result.equity.index, result.equity, color="#2166ac")
     axes[1].set_title(
         f"Equity  return {metrics['total_return_pct']:.1f}%  "

@@ -213,3 +213,18 @@ def test_atm_pullback_has_no_lookahead():
     cut = len(bars) - 25
     partial = strat.generate(bars.iloc[:cut])
     pd.testing.assert_series_equal(full["direction"].iloc[:cut], partial["direction"])
+
+
+def test_histdata_parses_est_minutes_into_utc_bars():
+    import io
+    import zipfile
+
+    from trading_agent.data.histdata import parse_m1
+
+    rows = "20180101 170000;1.2;1.3;1.1;1.25;0\n20180101 170100;1.25;1.4;1.2;1.3;0\n"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("DAT_ASCII_EURUSD_M1_2018.csv", rows)
+    df = parse_m1(buf.getvalue())
+    assert list(df.index) == [pd.Timestamp("2018-01-01 22:00"), pd.Timestamp("2018-01-01 22:01")]
+    assert df.iloc[1]["high"] == 1.4 and df.iloc[0]["close"] == 1.25

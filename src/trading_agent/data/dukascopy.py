@@ -55,7 +55,7 @@ def _fetch(symbol: str, path: str, cache_dir: Path | None, final: bool) -> bytes
     req = urllib.request.Request(
         URL.format(symbol=symbol, path=path), headers={"User-Agent": "Mozilla/5.0"}
     )
-    for attempt in range(6):
+    for attempt in range(8):
         try:
             raw = urllib.request.urlopen(req, timeout=60).read()
             break
@@ -63,12 +63,12 @@ def _fetch(symbol: str, path: str, cache_dir: Path | None, final: bool) -> bytes
             if exc.code == 404:
                 raw = b""
                 break
-            if attempt == 5:
+            if attempt == 7:
                 raise
         except (urllib.error.URLError, TimeoutError):
-            if attempt == 5:
+            if attempt == 7:
                 raise
-        time.sleep(2**attempt)
+        time.sleep(min(2**attempt, 60))
     if cache_file is not None and final:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_bytes(raw)

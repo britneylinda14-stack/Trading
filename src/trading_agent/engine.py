@@ -289,9 +289,8 @@ class PortfolioBacktester:
                 leg.last_price = price
 
             eq = realized + unrealized()
-            open_legs = [leg for leg in legs if leg.pos]
-            if open_legs and eq <= day_start_equity * (1 - risk.max_daily_loss):
-                for leg in open_legs:
+            if not halted_today and eq <= day_start_equity * (1 - risk.max_daily_loss):
+                for leg in [leg for leg in legs if leg.pos]:
                     leg.blocked = leg.pos.direction
                     realized += close(leg, leg.last_price, t, "daily_loss_limit")
                 halted_today = True

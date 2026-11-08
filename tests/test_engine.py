@@ -129,3 +129,12 @@ def test_signal_skipped_when_position_below_one_unit():
     res = run(bars, [0, 1, 1, 1, 1], 500.0, inst=gold, initial_equity=1_000)
     assert res.trades == []
     assert res.skipped_signals == 1
+
+
+def test_daily_halt_applies_after_stop_loss():
+    closes = [1.10, 1.10, 1.10, 1.10]
+    bars = make_bars(closes, freq="h", start="2024-01-02", wick=0.0001)
+    bars.loc[bars.index[2], "low"] = 1.09
+    res = run(bars, [0, 1, 1, -1], 0.005, risk_per_trade=0.05, max_open_risk=0.5)
+    assert [t.exit_reason for t in res.trades] == ["stop_loss"]
+    assert any("daily loss" in e for e in res.events)

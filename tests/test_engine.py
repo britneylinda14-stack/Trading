@@ -174,3 +174,13 @@ def test_partial_close_then_breakeven():
     assert t.exit_reason == "breakeven"
     assert t.exit_price == pytest.approx(t.entry_price)
     assert t.r_multiple == pytest.approx(0.5, abs=0.05)
+
+
+def test_breakeven_stop_wins_over_same_bar_target():
+    closes = [1.10, 1.10, 1.10, 1.13, 1.13]
+    lows = [1.0999, 1.0999, 1.0999, 1.095, 1.1299]
+    bars = make_bars(closes, wick=0.0001, lows=lows)
+    res = _plan_run(bars, [0, 1, 1, 1, 1], tp_r=2.5, be_r=1.0, partial=0.5)
+    (t,) = res.trades
+    assert t.exit_reason == "breakeven"
+    assert t.r_multiple == pytest.approx(0.5, abs=0.05)

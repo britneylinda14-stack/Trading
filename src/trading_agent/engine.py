@@ -319,9 +319,7 @@ class PortfolioBacktester:
                     ):
                         realized += take_partial(leg, be)
                         back = leg.c[i] if t == pos.entry_time else leg.lo[i] if d > 0 else leg.h[i]
-                        if not tp_hit and (
-                            back <= pos.entry_price if d > 0 else back >= pos.entry_price
-                        ):
+                        if back <= pos.entry_price if d > 0 else back >= pos.entry_price:
                             stop_hit = back_to_entry = True
                     if stop_hit or tp_hit:
                         target = pos.stop_price if stop_hit else pos.take_profit

@@ -315,7 +315,8 @@ class PortfolioBacktester:
         trades.sort(key=lambda tr: tr.entry_time)
         equity = pd.Series(equity_curve, index=timeline, name="equity")
         if trade_from is not None:
-            equity = equity[equity.index >= trade_from]
+            start = max(int(equity.index.searchsorted(trade_from)) - 1, 0)
+            equity = equity.iloc[start:]
 
         return BacktestResult(
             [inst for inst, _ in self.legs],

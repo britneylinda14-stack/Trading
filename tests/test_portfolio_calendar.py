@@ -69,7 +69,8 @@ def test_trade_from_warms_up_without_trading():
     bars = make_bars(np.linspace(1.10, 1.20, 30))
     res = Backtester(EUR, FixedStrategy([1] * 30, 0.05)).run(bars, trade_from=bars.index[10])
     assert res.trades[0].entry_time == bars.index[10]
-    assert res.equity.index[0] == bars.index[10]
+    assert res.equity.index[0] == bars.index[9]
+    assert res.equity.iloc[0] == pytest.approx(10_000)
 
 
 def test_nfp_rule_matches_known_dates():

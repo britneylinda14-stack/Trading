@@ -172,3 +172,8 @@ def test_research_rejects_split_outside_data():
     bars = make_bars(np.linspace(1.0, 1.1, 50), start="2025-01-01")
     with pytest.raises(ValueError, match="inside the data range"):
         sweep([EUR], "ema_cross", {"EUR_USD": bars}, "2020-01-01", {"fast": [5], "slow": [10]})
+
+
+def test_default_calendar_covers_scheduled_cpi():
+    cal = EventCalendar.default(include=("CPI",))
+    assert pd.Timestamp("2027-01-13 13:30") in {e.time for e in cal.events}

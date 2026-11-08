@@ -9,7 +9,7 @@ charts). This document compares that journal with a mechanical version of the sa
 | Journal checklist | `atm_pullback` |
 |---|---|
 | Order flow / structure H or B | Last two confirmed swing highs and lows both rising (long) or falling (short) (`structure=True`) |
-| MA50 and MA200 aligned | Close above MA50 above MA200 (long), mirrored for shorts |
+| MA50 and MA200 aligned | Close and MA50 both above MA200 (long), mirrored for shorts |
 | Fibonacci pullback 0.382–0.618 into a zone | Pullback from the last swing extreme retraces 0.382–`fib_max` of the impulse; impulse must be at least `min_impulse_atr` ATRs |
 | RSI divergence (regular or hidden) | Hidden RSI(14) divergence between the pullback low and the previous swing low (`divergence=True`) |
 | Trendline break trigger | Close above the high of the last `trigger_bars` bars, within `max_wait` bars of the pullback extreme |

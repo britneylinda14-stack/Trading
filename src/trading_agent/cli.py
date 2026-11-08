@@ -131,10 +131,17 @@ def _load(inst, args) -> pd.DataFrame:
 
 
 def _risk(args) -> RiskConfig:
+    try:
+        return _build_risk(args)
+    except ValueError as exc:
+        raise SystemExit(f"error: {exc}") from None
+
+
+def _build_risk(args) -> RiskConfig:
     return RiskConfig(
         initial_equity=args.equity,
         risk_per_trade=args.risk,
-        max_open_risk=max(args.max_open_risk, args.risk),
+        max_open_risk=args.max_open_risk,
         max_daily_loss=args.max_daily_loss,
         max_drawdown=args.max_drawdown,
         max_leverage=args.max_leverage,

@@ -184,3 +184,14 @@ def test_breakeven_stop_wins_over_same_bar_target():
     (t,) = res.trades
     assert t.exit_reason == "breakeven"
     assert t.r_multiple == pytest.approx(0.5, abs=0.05)
+
+
+def test_gap_open_beyond_target_takes_profit_before_breakeven():
+    closes = [1.10, 1.10, 1.10, 1.12, 1.12]
+    opens = [1.10, 1.10, 1.10, 1.13, 1.12]
+    lows = [1.0999, 1.0999, 1.0999, 1.095, 1.1199]
+    bars = make_bars(closes, wick=0.0001, opens=opens, lows=lows)
+    res = _plan_run(bars, [0, 1, 1, 1, 1], tp_r=2.5, be_r=1.0, partial=0.5)
+    (t,) = res.trades
+    assert t.exit_reason == "take_profit"
+    assert t.r_multiple > 1.5

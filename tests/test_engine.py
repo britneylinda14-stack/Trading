@@ -138,3 +138,39 @@ def test_daily_halt_applies_after_stop_loss():
     res = run(bars, [0, 1, 1, -1], 0.005, risk_per_trade=0.05, max_open_risk=0.5)
     assert [t.exit_reason for t in res.trades] == ["stop_loss"]
     assert any("daily loss" in e for e in res.events)
+
+
+class _ExitPlanStrategy(FixedStrategy):
+    def __init__(self, direction, stop_distance, tp_r, be_r, partial):
+        super().__init__(direction, stop_distance)
+        self.plan = {"take_profit_r": tp_r, "breakeven_r": be_r, "partial": partial}
+
+    def generate(self, bars):
+        return super().generate(bars).assign(**self.plan)
+
+
+def _plan_run(bars, direction, **plan):
+    inst = get_instrument("EUR_USD")
+    risk = RiskConfig(risk_per_trade=0.01)
+    strat = _ExitPlanStrategy(direction, 0.01, **plan)
+    return Backtester(inst, strat, risk).run(bars)
+
+
+def test_partial_close_then_target():
+    closes = [1.10, 1.10, 1.11, 1.13, 1.13]
+    bars = make_bars(closes, wick=0.0001)
+    res = _plan_run(bars, [0, 1, 1, 1, 1], tp_r=2.5, be_r=1.0, partial=0.5)
+    (t,) = res.trades
+    assert t.exit_reason == "take_profit"
+    assert t.partial_units > 0 and t.partial_units == pytest.approx(t.units, abs=1)
+    assert t.r_multiple == pytest.approx((1.0 + 2.5) / 2, abs=0.05)
+
+
+def test_partial_close_then_breakeven():
+    closes = [1.10, 1.10, 1.111, 1.105, 1.095, 1.095]
+    bars = make_bars(closes, wick=0.0001)
+    res = _plan_run(bars, [0, 1, 1, 1, 1, 1], tp_r=2.5, be_r=1.0, partial=0.5)
+    (t,) = res.trades
+    assert t.exit_reason == "breakeven"
+    assert t.exit_price == pytest.approx(t.entry_price)
+    assert t.r_multiple == pytest.approx(0.5, abs=0.05)

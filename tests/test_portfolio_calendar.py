@@ -177,3 +177,39 @@ def test_research_rejects_split_outside_data():
 def test_default_calendar_covers_scheduled_cpi():
     cal = EventCalendar.default(include=("CPI",))
     assert pd.Timestamp("2027-01-13 13:30") in {e.time for e in cal.events}
+
+
+def _pullback_bars():
+    up = np.linspace(1.00, 1.10, 300)
+    swings = []
+    level = 1.10
+    for _ in range(4):
+        swings += list(np.linspace(level, level + 0.02, 15)) + list(
+            np.linspace(level + 0.02, level + 0.01, 8)
+        )
+        level += 0.01
+    closes = np.r_[up, swings, np.linspace(level, level + 0.03, 20)]
+    return make_bars(closes, freq="h", wick=0.0003)
+
+
+def test_atm_pullback_buys_trend_pullbacks_with_exit_plan():
+    from trading_agent.strategies import AtmPullback
+
+    bars = _pullback_bars()
+    sig = AtmPullback(swing=3, min_impulse_atr=1.0, divergence=False).generate(bars)
+    entries = sig.index[(sig["direction"] == 1) & (sig["direction"].shift(fill_value=0) != 1)]
+    assert len(entries) >= 1
+    assert (sig["direction"] >= 0).all()
+    assert (sig.loc[entries, "stop_distance"] > 0).all()
+    assert {"take_profit_r", "breakeven_r", "partial"} <= set(sig.columns)
+
+
+def test_atm_pullback_has_no_lookahead():
+    from trading_agent.strategies import AtmPullback
+
+    bars = _pullback_bars()
+    strat = AtmPullback(swing=3, min_impulse_atr=1.0, divergence=False)
+    full = strat.generate(bars)
+    cut = len(bars) - 25
+    partial = strat.generate(bars.iloc[:cut])
+    pd.testing.assert_series_equal(full["direction"].iloc[:cut], partial["direction"])

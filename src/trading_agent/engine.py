@@ -237,7 +237,8 @@ class PortfolioBacktester:
                         realized += close(leg, leg.o[i], t, "news_blackout")
                         leg.blocked = sig
 
-                wants_entry = leg.pos is None and sig != 0 and sig != leg.blocked
+                last_bar = leg.k == len(leg.times)
+                wants_entry = leg.pos is None and sig != 0 and sig != leg.blocked and not last_bar
                 if wants_entry and blackout:
                     blackout_skips += 1
                 elif wants_entry and not (halted_today or killed or warming_up):

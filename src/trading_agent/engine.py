@@ -205,6 +205,7 @@ class PortfolioBacktester:
                     day_start_equity = equity_curve[-1]
                 halted_today = False
 
+            closed_bars: list[tuple[_Leg, float]] = []
             for leg in legs:
                 if leg.k >= len(leg.times) or leg.times[leg.k] != t:
                     continue
@@ -282,7 +283,10 @@ class PortfolioBacktester:
                         reason = "stop_loss" if stop_hit else "take_profit"
                         realized += close(leg, fill_mid, t, reason)
                         leg.blocked = d
-                leg.last_price = leg.c[i]
+                closed_bars.append((leg, leg.c[i]))
+
+            for leg, price in closed_bars:
+                leg.last_price = price
 
             eq = realized + unrealized()
             open_legs = [leg for leg in legs if leg.pos]

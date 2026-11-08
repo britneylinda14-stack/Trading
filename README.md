@@ -11,6 +11,7 @@ paper-trading adapter comes next.
 
 - **Data**
   - Free historical bars from Yahoo Finance (daily for decades; hourly for about the last 2 years).
+  - Free multi-year intraday FX/gold/silver bars (2012 onward, built from 1-minute data) from HistData.com: `--source histdata --interval 1h` (or `30m`, `15m`, ...).
   - Your own CSVs, including **MetaTrader 5 bar exports** (`--mt5-csv`).
 - **Engine** (bar by bar, no lookahead)
   - A signal on bar *i*'s close is filled at bar *i+1*'s open.

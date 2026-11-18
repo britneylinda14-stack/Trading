@@ -31,25 +31,28 @@ tune-then-untouched-test method as `docs/RESEARCH.md`. Historical data only; not
 
 | Setting | In-sample Sharpe | Out-of-sample Sharpe | OOS CAGR | OOS max DD |
 |---|---|---|---|---|
-| lookback 252, ATR x3 (best in-sample) | 0.53 | 0.16 | 0.8% | -16.7% |
-| lookback 126, ATR x5 | 0.37 | 0.18 | 0.8% | -14.6% |
-| lookback 63, ATR x5 | 0.44 | -0.02 | -0.2% | -15.4% |
+| lookback 252, ATR x3 (best in-sample) | 0.47 | 0.17 | 0.9% | -18.0% |
+| lookback 252, ATR x5 | 0.44 | 0.19 | 0.8% | -12.9% |
+| lookback 126, ATR x5 | 0.24 | 0.17 | 0.8% | -12.7% |
+| lookback 126, ATR x3 | 0.24 | -0.59 | -2.3% | -25.3% (kill switch) |
+| lookback 63, ATR x3 / x5 | 0.28 / 0.29 | 0.01 / -0.11 | -0.1% / -0.7% | -22% / -17% |
 
-Positive Sharpe: 6/6 in-sample, 5/6 out-of-sample. Sensitivity check with a wide 10-ATR stop
-(closer to the literature's no-stop version, `--risk 0.00625 --max-open-risk 0.2`): 3/3
-positive in both periods, out-of-sample Sharpe 0.12–0.27 (lookback 252: 1.6% CAGR, -17% DD).
+Positive Sharpe: 6/6 in-sample, 4/6 out-of-sample. Sensitivity check with a wide 10-ATR stop
+(closer to the literature's no-stop version, `--risk 0.00625 --max-open-risk 0.2`): lookback
+252 has OOS Sharpe 0.33 (2.2% CAGR, -17.6% DD); 126 has 0.13; 63 has -0.03.
 
 `fx_carry`, 0.5% risk per pair: positive Sharpe 4/12 in-sample, **0/12 out-of-sample**
 (median OOS Sharpe -0.24). Full period 2005–2026 with defaults: -6.8%, Sharpe -0.15.
 
 ## Verdict
 
-- **Trend-following is the only thing tested so far that holds up out of sample, but the edge
-  is small.** It stays positive on untouched data across nearly every setting, which is what a
-  real (if weak) effect looks like. But an OOS Sharpe of 0.15–0.27 over ~11 years is not
-  statistically distinguishable from zero, and it weakened from 0.4–0.6 in-sample. It lost
-  money in 2008 and 2022 (default settings, full-period run), the years real managed-futures funds made the most, which points to
-  the data (roll gaps, front-month only) or the simplified rules.
+- **12-month trend-following is the only thing tested so far that holds up out of sample, but
+  the edge is small.** The 252-day lookback is positive on untouched data with every stop
+  setting (OOS Sharpe 0.17–0.33). Shorter lookbacks are not. A Sharpe of 0.2–0.3 over ~11
+  years is not statistically distinguishable from zero, and it weakened from 0.45–0.75
+  in-sample. It earned only +1.8% in 2008 and +2.6% in 2022 (default settings, full-period
+  run), the years real managed-futures funds made the most, which points to the data (roll
+  gaps, front-month only) or the simplified rules.
 - **FX carry with a trend filter did not work** on 2005–2026 USD pairs. Policy-rate
   differentials were small for most of 2009–2021, and the trend filter cut the trades that did
   earn carry.

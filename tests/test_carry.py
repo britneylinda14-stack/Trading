@@ -46,15 +46,18 @@ def test_long_high_yielder_earns_carry_and_short_pays_it():
     assert _financing(-1, 0.04) > _financing(-1, 0.0) > 0
 
 
-def test_tsmom_only_changes_direction_at_month_end():
+def test_tsmom_only_changes_direction_at_month_start():
     closes = np.r_[np.linspace(1, 2, 80), np.linspace(2, 1, 80)]
     bars = make_bars(closes)
     sig = TimeSeriesMomentum(lookback=20).generate(bars)["direction"]
     changes = sig.index[sig.ne(sig.shift()).to_numpy()][1:]
     assert len(changes) >= 2
     for day in changes:
-        assert (day + pd.Timedelta(days=1)).month != day.month, "signal flips on month-end bars"
+        assert (day - pd.Timedelta(days=1)).month != day.month, "signal flips on month-start bars"
     assert sig.iloc[60] == 1 and sig.iloc[-1] == -1
+    assert sig.iloc[:100].equals(
+        TimeSeriesMomentum(lookback=20).generate(bars.iloc[:100])["direction"]
+    ), "appending bars must not revise earlier signals"
 
 
 def test_fx_carry_needs_trend_and_rate_agreement():

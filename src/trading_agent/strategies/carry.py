@@ -10,7 +10,8 @@ from .base import Strategy
 class TimeSeriesMomentum(Strategy):
     """Classic time-series momentum: hold the sign of the past `lookback`-bar return.
 
-    The direction is only re-evaluated on the last bar of each month (monthly rebalancing),
+    The direction is only re-evaluated on the first bar of each month (monthly rebalancing,
+    decided from that bar's close so earlier signals never change as new bars arrive),
     and positions are sized from an ATR stop, so every market carries similar risk.
     """
 
@@ -23,9 +24,8 @@ class TimeSeriesMomentum(Strategy):
         close = bars["close"]
         momentum = np.sign(close / close.shift(self.lookback) - 1)
         month = pd.Series(bars.index.to_period("M"), index=bars.index)
-        month_end = month.ne(month.shift(-1))
-        month_end.iloc[-1] = False
-        direction = momentum.where(month_end).ffill().fillna(0).astype(int)
+        month_start = month.ne(month.shift(1))
+        direction = momentum.where(month_start).ffill().fillna(0).astype(int)
         stop = atr(bars, self.atr_period) * self.atr_mult
         return pd.DataFrame({"direction": direction, "stop_distance": stop}, index=bars.index)
 

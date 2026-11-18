@@ -44,7 +44,8 @@ paper-trading adapter comes next.
   - Add your own events with `--events-csv`.
 - **Research** (`trading-agent research`): parameter sweeps tuned on an in-sample period,
   then run on untouched out-of-sample data. See [docs/RESEARCH.md](docs/RESEARCH.md) for the
-  first results.
+  first results and [docs/TREND_CARRY.md](docs/TREND_CARRY.md) for futures trend-following
+  (`-s tsmom -i futures`) and FX carry (`-s fx_carry -i fx --carry`).
 - **Reports**
   - Metrics: return, CAGR, max drawdown, Sharpe, win rate, profit factor, average R, costs.
   - `equity.png`, `trades.csv`, `equity.csv` and `summary.json` in `reports/<instrument>_<strategy>/`.
@@ -100,11 +101,12 @@ class MyStrategy(Strategy):
 ```bash
 python scripts/fetch_fomc.py                 # FOMC decision dates from federalreserve.gov
 python scripts/fetch_bls.py --cdp http://localhost:9222   # CPI + NFP (BLS needs a real browser)
+python scripts/fetch_policy_rates.py         # central-bank policy rates from the BIS (FX carry)
 ```
 
 ## Roadmap
 
-1. FX carry and diversified time-series momentum strategies (see docs/RESEARCH.md).
+1. Back-adjusted futures data to re-test `tsmom` (see docs/TREND_CARRY.md).
 2. OANDA v20 adapter: historical bid/ask candles and paper trading on a practice account.
 3. LLM "analyst" as a news and risk filter on top of a validated strategy.
 4. Deployment as a 24/5 service with alerts.

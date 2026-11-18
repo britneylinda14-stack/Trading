@@ -24,6 +24,9 @@ trading-agent = "trading_agent.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+trading_agent = ["calendar_data/*.csv"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

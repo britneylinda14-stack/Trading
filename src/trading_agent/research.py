@@ -33,6 +33,8 @@ DEFAULT_GRIDS: dict[str, dict[str, list]] = {
         "session_end": [12, 16, 20],
         "stop_mult": [0.5, 1.0],
     },
+    "tsmom": {"lookback": [63, 126, 252], "atr_mult": [3.0, 5.0]},
+    "fx_carry": {"trend": [100, 200], "min_carry": [0.005, 0.01, 0.02], "atr_mult": [3.0, 5.0]},
     "atm_pullback": {
         "swing": [3, 5],
         "fib_max": [0.618, 0.786],

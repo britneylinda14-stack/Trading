@@ -111,6 +111,7 @@ class _Leg:
     tp_r: np.ndarray | None = None
     be_r: np.ndarray | None = None
     partial: np.ndarray | None = None
+    carry: np.ndarray | None = None
 
 
 def _optional(signals: pd.DataFrame, col: str) -> np.ndarray | None:
@@ -163,6 +164,7 @@ class PortfolioBacktester:
             tp_r=_optional(signals, "take_profit_r"),
             be_r=_optional(signals, "breakeven_r"),
             partial=_optional(signals, "partial"),
+            carry=bars["carry"].fillna(0).to_numpy(dtype=float) if "carry" in bars else None,
         )
 
     @staticmethod
@@ -257,7 +259,10 @@ class PortfolioBacktester:
                     if leg.pos is not None:
                         days = (day - leg.last_day).days
                         notional = inst.notional_usd(leg.pos.units, leg.c[i - 1])
-                        cost = notional * inst.financing_rate * days / 365
+                        rate = inst.financing_rate
+                        if leg.carry is not None:
+                            rate -= leg.pos.direction * leg.carry[i - 1]
+                        cost = notional * rate * days / 365
                         leg.pos.financing += cost
                         realized -= cost
                     leg.last_day = day

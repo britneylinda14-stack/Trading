@@ -7,9 +7,16 @@ from pathlib import Path
 import pandas as pd
 
 from .calendar import EventCalendar
-from .data import load_csv, load_dukascopy, load_histdata, load_mt5_csv, load_yahoo
+from .data import (
+    load_csv,
+    load_dukascopy,
+    load_histdata,
+    load_mt5_csv,
+    load_yahoo,
+    with_carry,
+)
 from .engine import PortfolioBacktester
-from .instruments import INSTRUMENTS, get_instrument
+from .instruments import INSTRUMENT_GROUPS, INSTRUMENTS, get_instrument
 from .metrics import compute_metrics, per_instrument
 from .report import write_report
 from .research import DEFAULT_GRIDS, sweep, write_sweep
@@ -53,7 +60,7 @@ def _add_common(p: argparse.ArgumentParser) -> None:
         "--instrument",
         nargs="+",
         default=["EUR_USD"],
-        help=f"One or more of: {', '.join(INSTRUMENTS)}, or 'all'",
+        help=f"Instruments, a group ({', '.join(INSTRUMENT_GROUPS)}) or 'all'; see `instruments`",
     )
     p.add_argument("-s", "--strategy", default="ema_cross", choices=list(STRATEGIES))
     p.add_argument("--start", default="2010-01-01")
@@ -73,6 +80,11 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-daily-loss", type=float, default=0.03)
     p.add_argument("--max-drawdown", type=float, default=0.25)
     p.add_argument("--max-leverage", type=float, default=None)
+    p.add_argument(
+        "--carry",
+        action="store_true",
+        help="Charge/credit FX financing from central-bank rate differentials (needed by fx_carry)",
+    )
     p.add_argument("--take-profit-r", type=float, default=None)
     p.add_argument(
         "--news-filter",
@@ -122,13 +134,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _instruments(args) -> list:
-    names = list(INSTRUMENTS) if args.instrument == ["all"] else args.instrument
+    names = []
+    for name in args.instrument:
+        group = list(INSTRUMENTS) if name == "all" else INSTRUMENT_GROUPS.get(name, [name])
+        names += [n for n in group if n not in names]
     if (args.csv or args.mt5_csv) and len(names) != 1:
         raise SystemExit("--csv/--mt5-csv require exactly one --instrument")
     return [get_instrument(n) for n in names]
 
 
 def _load(inst, args) -> pd.DataFrame:
+    bars = _load_bars(inst, args)
+    return with_carry(bars, inst) if args.carry and inst.kind == "forex" else bars
+
+
+def _load_bars(inst, args) -> pd.DataFrame:
     if args.mt5_csv:
         return load_mt5_csv(args.mt5_csv)
     if args.csv:
